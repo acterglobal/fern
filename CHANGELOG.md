@@ -2,6 +2,30 @@ Unreleased
 ==========
 
 
+0.7.1 (2024-12-15)
+==================
+
+- Add syslog v7 support (thanks [@BlackDex]!)
+
+0.7.0 (2024-10-20)
+==================
+
+- Upgrade `colored` to version 2. This is a breaking change due to
+  `colored` being exposed in the public API of `fern`. (thanks [@faern] for
+  doing the boilerplate here!)
+- Remove most of the unsoundness warning, and update it to reflect fern 0.7.0
+  fixing the issue.
+
+0.6.2 (2023-03-23)
+==================
+
+- Add security warning for "colored" feature when using a global allocator
+  to doc homepage and README.md. See
+  [fern-0.6.2 README.md](https://github.com/daboross/fern/blob/fern-0.6.2/README.md)
+- Change examples to use `env_logger`-style formatting
+- Improve main documentation example explanation
+- Misc. style improvements (clippy lint fixes which have no functional change)
+
 0.6.1 (2022-04-15)
 ==================
 
@@ -421,3 +445,5 @@ First release, version 0.1.0.
 [@autarch]: https://github.com/autarch
 [@vorner]: https://github.com/vorner
 [@EasyPost]: https://github.com/EasyPost
+[@faern]: https://github.com/faern
+[@BlackDex]: https://github.com/BlackDex

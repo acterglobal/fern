@@ -19,7 +19,7 @@ struct VerboseDisplayThing<'a> {
     msg: &'a str,
 }
 
-impl<'a> fmt::Display for VerboseDisplayThing<'a> {
+impl fmt::Display for VerboseDisplayThing<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         manual_log(
             self.log_copy,
@@ -65,7 +65,7 @@ fn file_deadlock() {
 
         {
             let contents = {
-                let mut log_read = fs::File::open(&temp_log_dir.path().join("test.log")).unwrap();
+                let mut log_read = fs::File::open(temp_log_dir.path().join("test.log")).unwrap();
                 let mut buf = String::new();
                 log_read.read_to_string(&mut buf).unwrap();
                 buf

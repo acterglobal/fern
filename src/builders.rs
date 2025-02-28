@@ -11,6 +11,9 @@ use std::path::{Path, PathBuf};
 #[cfg(all(not(windows), any(feature = "syslog-4", feature = "syslog-6")))]
 use std::collections::HashMap;
 
+#[cfg(all(not(windows), feature = "syslog-7"))]
+use std::collections::BTreeMap;
+
 use log::Log;
 
 use crate::{log_impl, Filter, FormatCallback, Formatter};
@@ -22,10 +25,13 @@ use crate::log_impl::DateBasedState;
 use crate::log_impl::ManualState;
 
 #[cfg(all(not(windows), feature = "syslog-4"))]
-use crate::{Syslog4Rfc3164Logger, Syslog4Rfc5424Logger};
+use crate::{Syslog4Rfc3164Logger, Syslog4Rfc5424Logger, Syslog4TransformFn};
 
 #[cfg(all(not(windows), feature = "syslog-6"))]
-use crate::{Syslog6Rfc3164Logger, Syslog6Rfc5424Logger};
+use crate::{Syslog6Rfc3164Logger, Syslog6Rfc5424Logger, Syslog6TransformFn};
+
+#[cfg(all(not(windows), feature = "syslog-7"))]
+use crate::{Syslog7Rfc3164Logger, Syslog7Rfc5424Logger, Syslog7TransformFn};
 
 /// The base dispatch logger.
 ///
@@ -48,7 +54,7 @@ use crate::{Syslog6Rfc3164Logger, Syslog6Rfc5424Logger};
 /// fern::Dispatch::new()
 ///     .format(|out, message, record| {
 ///         out.finish(format_args!(
-///             "[{}][{}] {}",
+///             "[{} {}] {}",
 ///             record.level(),
 ///             record.target(),
 ///             message,
@@ -162,7 +168,7 @@ impl Dispatch {
     /// ```
     /// fern::Dispatch::new().format(|out, message, record| {
     ///     out.finish(format_args!(
-    ///         "[{}][{}] {}",
+    ///         "[{} {}] {}",
     ///         record.level(),
     ///         record.target(),
     ///         message
@@ -297,7 +303,7 @@ impl Dispatch {
             .levels
             .iter()
             .enumerate()
-            .find(|&(_, &(ref name, _))| name == &module)
+            .find(|(_, (name, _))| *name == module)
         {
             self.levels.remove(index);
         }
@@ -507,6 +513,21 @@ impl Dispatch {
                         transform,
                     }))
                 }
+                #[cfg(all(not(windows), feature = "syslog-7"))]
+                OutputInner::Syslog7Rfc3164(logger) => {
+                    max_child_level = log::LevelFilter::Trace;
+                    Some(log_impl::Output::Syslog7Rfc3164(log_impl::Syslog7Rfc3164 {
+                        inner: Mutex::new(logger),
+                    }))
+                }
+                #[cfg(all(not(windows), feature = "syslog-7"))]
+                OutputInner::Syslog7Rfc5424 { logger, transform } => {
+                    max_child_level = log::LevelFilter::Trace;
+                    Some(log_impl::Output::Syslog7Rfc5424(log_impl::Syslog7Rfc5424 {
+                        inner: Mutex::new(logger),
+                        transform,
+                    }))
+                }
                 OutputInner::Panic => {
                     max_child_level = log::LevelFilter::Trace;
                     Some(log_impl::Output::Panic(log_impl::Panic))
@@ -604,11 +625,11 @@ impl Dispatch {
         filters.shrink_to_fit();
 
         let dispatch = log_impl::Dispatch {
-            output: output,
-            default_level: default_level,
+            output,
+            default_level,
             levels: levels.into(),
-            format: format,
-            filters: filters,
+            format,
+            filters,
         };
 
         (real_min, dispatch)
@@ -621,7 +642,7 @@ impl Dispatch {
         (level, Arc::new(logger))
     }
 
-    /// Builds this logger into a `Box<log::Log>` and calculates the minimum
+    /// Builds this logger into a `Box<dyn log::Log>` and calculates the minimum
     /// log level needed to have any effect.
     ///
     /// While this method is exposed publicly, [`Dispatch::apply`] is typically
@@ -731,11 +752,7 @@ enum OutputInner {
     #[cfg(all(not(windows), feature = "syslog-4"))]
     Syslog4Rfc5424 {
         logger: Syslog4Rfc5424Logger,
-        transform: Box<
-            dyn Fn(&log::Record) -> (i32, HashMap<String, HashMap<String, String>>, String)
-                + Sync
-                + Send,
-        >,
+        transform: Box<Syslog4TransformFn>,
     },
     #[cfg(all(not(windows), feature = "syslog-6"))]
     Syslog6Rfc3164(Syslog6Rfc3164Logger),
@@ -743,11 +760,15 @@ enum OutputInner {
     #[cfg(all(not(windows), feature = "syslog-6"))]
     Syslog6Rfc5424 {
         logger: Syslog6Rfc5424Logger,
-        transform: Box<
-            dyn Fn(&log::Record) -> (u32, HashMap<String, HashMap<String, String>>, String)
-                + Sync
-                + Send,
-        >,
+        transform: Box<Syslog6TransformFn>,
+    },
+    #[cfg(all(not(windows), feature = "syslog-7"))]
+    Syslog7Rfc3164(Syslog7Rfc3164Logger),
+    /// Sends all messages through the transform then passes to the syslog.
+    #[cfg(all(not(windows), feature = "syslog-7"))]
+    Syslog7Rfc5424 {
+        logger: Syslog7Rfc5424Logger,
+        transform: Box<Syslog7TransformFn>,
     },
     /// Panics with messages text for all messages.
     Panic,
@@ -941,8 +962,8 @@ impl From<Box<syslog3::Logger>> for Output {
     /// Log levels are translated trace => debug, debug => debug, info =>
     /// informational, warn => warning, and error => error.
     ///
-    /// Note that while this takes a Box<Logger> for convenience (syslog
-    /// methods return Boxes), it will be immediately unboxed upon storage
+    /// Note that while this takes a `Box<Logger>` for convenience (syslog
+    /// methods return `Box`es), it will be immediately unboxed upon storage
     /// in the configuration structure. This will create a configuration
     /// identical to that created by passing a raw `syslog::Logger`.
     ///
@@ -959,7 +980,7 @@ impl From<Syslog4Rfc3164Logger> for Output {
     /// Log levels are translated trace => debug, debug => debug, info =>
     /// informational, warn => warning, and error => error.
     ///
-    /// Note that due to https://github.com/Geal/rust-syslog/issues/41,
+    /// Note that due to <https://github.com/Geal/rust-syslog/issues/41>,
     /// logging to this backend requires one allocation per log call.
     ///
     /// This is for RFC 3164 loggers. To use an RFC 5424 logger, use the
@@ -978,15 +999,34 @@ impl From<Syslog6Rfc3164Logger> for Output {
     /// Log levels are translated trace => debug, debug => debug, info =>
     /// informational, warn => warning, and error => error.
     ///
-    /// Note that due to https://github.com/Geal/rust-syslog/issues/41,
+    /// Note that due to <https://github.com/Geal/rust-syslog/issues/41>,
     /// logging to this backend requires one allocation per log call.
     ///
     /// This is for RFC 3164 loggers. To use an RFC 5424 logger, use the
     /// [`Output::syslog_5424`] helper method.
     ///
-    /// This requires the `"syslog-4"` feature.
+    /// This requires the `"syslog-6"` feature.
     fn from(log: Syslog6Rfc3164Logger) -> Self {
         Output(OutputInner::Syslog6Rfc3164(log))
+    }
+}
+
+#[cfg(all(not(windows), feature = "syslog-7"))]
+impl From<Syslog7Rfc3164Logger> for Output {
+    /// Creates an output logger which writes all messages to the given syslog.
+    ///
+    /// Log levels are translated trace => debug, debug => debug, info =>
+    /// informational, warn => warning, and error => error.
+    ///
+    /// Note that due to <https://github.com/Geal/rust-syslog/issues/41>,
+    /// logging to this backend requires one allocation per log call.
+    ///
+    /// This is for RFC 3164 loggers. To use an RFC 5424 logger, use the
+    /// [`Output::syslog_5424`] helper method.
+    ///
+    /// This requires the `"syslog-7"` feature.
+    fn from(log: Syslog7Rfc3164Logger) -> Self {
+        Output(OutputInner::Syslog7Rfc3164(log))
     }
 }
 
@@ -1048,7 +1088,7 @@ impl Output {
 
     /// Returns a logger using arbitrary write object and custom separator.
     ///
-    /// If the default separator of `\n` is acceptable, an `Box<Write + Send>`
+    /// If the default separator of `\n` is acceptable, an `Box<dyn Write + Send>`
     /// instance can be passed into [`Dispatch::chain`] directly.
     ///
     /// ```no_run
@@ -1058,7 +1098,7 @@ impl Output {
     ///
     /// fern::Dispatch::new()
     ///     // as long as we explicitly cast into a type-erased Box
-    ///     .chain(Box::new(writer) as Box<std::io::Write + Send>)
+    ///     .chain(Box::new(writer) as Box<dyn std::io::Write + Send>)
     ///     # .into_log();
     /// #     Ok(())
     /// # }
@@ -1294,6 +1334,34 @@ impl Output {
         })
     }
 
+    /// Returns a logger which logs into an RFC5424 syslog (using syslog version 6)
+    ///
+    /// This method takes an additional transform method to turn the log data
+    /// into RFC5424 data.
+    ///
+    /// I've honestly got no clue what the expected keys and values are for
+    /// this kind of logging, so I'm just going to link [the rfc] instead.
+    ///
+    /// If you're an expert on syslog logging and would like to contribute
+    /// an example to put here, it would be gladly accepted!
+    ///
+    /// This requires the `"syslog-7"` feature.
+    ///
+    /// [the rfc]: https://tools.ietf.org/html/rfc5424
+    #[cfg(all(not(windows), feature = "syslog-7"))]
+    pub fn syslog7_5424<F>(logger: Syslog7Rfc5424Logger, transform: F) -> Self
+    where
+        F: Fn(&log::Record) -> (u32, BTreeMap<String, BTreeMap<String, String>>, String)
+            + Sync
+            + Send
+            + 'static,
+    {
+        Output(OutputInner::Syslog7Rfc5424 {
+            logger,
+            transform: Box::new(transform),
+        })
+    }
+
     /// Returns a logger which simply calls the given function with each
     /// message.
     ///
@@ -1344,7 +1412,7 @@ impl Default for Dispatch {
 impl fmt::Debug for Dispatch {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         struct LevelsDebug<'a>(&'a [(Cow<'static, str>, log::LevelFilter)]);
-        impl<'a> fmt::Debug for LevelsDebug<'a> {
+        impl fmt::Debug for LevelsDebug<'_> {
             fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 f.debug_map()
                     .entries(self.0.iter().map(|t| (t.0.as_ref(), t.1)))
@@ -1352,7 +1420,7 @@ impl fmt::Debug for Dispatch {
             }
         }
         struct FiltersDebug<'a>(&'a [Box<Filter>]);
-        impl<'a> fmt::Debug for FiltersDebug<'a> {
+        impl fmt::Debug for FiltersDebug<'_> {
             fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 f.debug_list()
                     .entries(self.0.iter().map(|_| "<filter closure>"))
@@ -1450,6 +1518,16 @@ impl fmt::Debug for OutputInner {
             #[cfg(all(not(windows), feature = "syslog-6"))]
             OutputInner::Syslog6Rfc5424 { .. } => f
                 .debug_tuple("Output::Syslog6Rfc5424")
+                .field(&"<unprintable syslog::Logger>")
+                .finish(),
+            #[cfg(all(not(windows), feature = "syslog-7"))]
+            OutputInner::Syslog7Rfc3164 { .. } => f
+                .debug_tuple("Output::Syslog7Rfc3164")
+                .field(&"<unprintable syslog::Logger>")
+                .finish(),
+            #[cfg(all(not(windows), feature = "syslog-7"))]
+            OutputInner::Syslog7Rfc5424 { .. } => f
+                .debug_tuple("Output::Syslog7Rfc5424")
                 .field(&"<unprintable syslog::Logger>")
                 .finish(),
             OutputInner::Dispatch(ref dispatch) => {

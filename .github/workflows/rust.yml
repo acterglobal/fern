@@ -2,16 +2,14 @@ name: tests
 
 on:
   push:
-    branches: main
   pull_request:
-    branches: main
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   test:
-    name: Test Suite
+    name: Run Tests
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -21,60 +19,26 @@ jobs:
         os:
           - ubuntu-latest
           - windows-latest
+        toolchain:
+          - stable
+          - 1.70.0
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ matrix.rust }}
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --lib --bins --examples --tests --benches
-      - uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --lib --bins --examples --tests --benches --all-features
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --no-default-features
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --features=colored
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --features=syslog-3
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --features=syslog-4
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --features=syslog-6
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --features=reopen-03
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --features=reopen-1
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --features=meta-logging-in-format
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --all-features
+      - uses: actions/checkout@v4
+      - run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
+      - run: cargo build --all-targets
+      - run: cargo build --all-targets --no-default-features
+      - run: cargo build --all-targets --all-features
+      - run: cargo test
+      - run: cargo test --no-default-features
+      - run: cargo test --features=colored
+      - run: cargo test --features=syslog-3
+      - run: cargo test --features=syslog-4
+      - run: cargo test --features=syslog-6
+      - run: cargo test --features=syslog-7
+      - run: cargo test --features=reopen-03
+      - run: cargo test --features=reopen-1
+      - run: cargo test --features=meta-logging-in-format
+      - run: cargo test --all-features
       - run: cargo run --example cmd-program
       - run: cargo run --example cmd-program -- --verbose
       - run: cargo run --example colored --features colored
@@ -84,21 +48,44 @@ jobs:
       # we don't exactly have a good test suite for DateBased right now, so let's at least do this:
       - run: cargo run --example date-based-file-log --features date-based,meta-logging-in-format
       - run: cargo run --example manual-file-log --features manual,meta-logging-in-format
+      - run: cargo doc --all-features
+        env:
+          RUSTDOCFLAGS: -D warnings
   linux:
-    name: Linux-only Examples
+    name: Linux Examples
     runs-on: ubuntu-latest
     strategy:
       matrix:
         rust:
           - stable
           - beta
+        toolchain:
+          - stable
+          - 1.70.0
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ matrix.rust }}
-          override: true
+      - uses: actions/checkout@v4
+      - run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
       - run: cargo run --example syslog3 --features syslog-3
       - run: cargo run --example syslog4 --features syslog-4
       - run: cargo run --example syslog --features syslog-6
+      - run: cargo run --example syslog7 --features syslog-7
+  msrv:
+    name: MSRV Compat
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup update 1.60.0 && rustup default 1.60.0
+      - run: cargo build
+  optional_lints:
+    name: Optional Lints
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup update stable && rustup default stable
+      - run: cargo fmt --check
+      - run: cargo clippy --all-features --all-targets -- -D warnings

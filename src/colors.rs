@@ -5,7 +5,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! fern = { version = "0.6", features = ["colored"] }
+//! fern = { version = "0.7", features = ["colored"] }
 //! ```
 //!
 //! ---
@@ -53,7 +53,7 @@
 //! [examples/pretty-colored.rs][ex].
 //!
 //! [`ColoredLevelConfig`]: struct.ColoredLevelConfig.html
-//! [ex]: https://github.com/daboross/fern/blob/fern-0.6.1/examples/pretty-colored.rs
+//! [ex]: https://github.com/daboross/fern/blob/fern-0.7.0/examples/pretty-colored.rs
 use std::fmt;
 
 pub use colored::Color;
@@ -273,10 +273,7 @@ impl Default for ColoredLevelConfig {
 
 impl ColoredLogLevel for Level {
     fn colored(&self, color: Color) -> WithFgColor<Level> {
-        WithFgColor {
-            text: *self,
-            color: color,
-        }
+        WithFgColor { text: *self, color }
     }
 }
 
@@ -314,7 +311,7 @@ mod test {
                     "{}",
                     WithFgColor {
                         text: "test",
-                        color: color,
+                        color,
                     }
                 )
             );
